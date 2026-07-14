@@ -1,0 +1,30 @@
+{
+  "edge_cases": {
+    "duplicate_order_item": "OI2001",
+    "email_change_customer": "C001",
+    "illegal_quantity_order_item": "OI2002",
+    "new_customer": "C006",
+    "null_to_value_customer": "C002",
+    "order_after_change": "O2001",
+    "order_before_change": "O1001"
+  },
+  "row_counts": {
+    "batch_1": {
+      "customers": 5,
+      "inventory_events": 5,
+      "order_items": 6,
+      "orders": 5,
+      "products": 6,
+      "warehouses": 3
+    },
+    "batch_2": {
+      "customers": 3,
+      "inventory_events": 3,
+      "order_items": 5,
+      "orders": 3,
+      "products": 0,
+      "warehouses": 0
+    }
+  },
+  "seed": 42
+}

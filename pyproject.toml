@@ -25,5 +25,11 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
+[tool.ruff.lint.per-file-ignores]
+# Data-definition module: long inline row literals are intentional and readable.
+"src/retail_lakehouse/generate_source_data.py" = ["E501"]
+# Databricks notebooks: dbutils/display/spark are injected at runtime.
+"databricks/**/*.py" = ["F821"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
