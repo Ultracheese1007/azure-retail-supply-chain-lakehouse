@@ -1,1 +1,47 @@
+# macOS
 .DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Ruff
+.ruff_cache/
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+
+# Databricks local metadata
+.databricks/
+*.dbc
+
+# Environment variables and secrets
+.env
+.env.*
+secrets.*
+*.secret
+*.key
+*.pem
+
+# Locally generated data
+/data/
+*.parquet
+*.avro
+*.delta
+_delta_log/
