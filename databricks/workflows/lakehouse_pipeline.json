@@ -1,0 +1,211 @@
+{
+  "name": "retail_lakehouse_pipeline",
+  "description": "Bronze to Gold retail lakehouse pipeline with an executable validation gate.",
+  "max_concurrent_runs": 1,
+  "timeout_seconds": 7200,
+  "parameters": [
+    {
+      "name": "catalog",
+      "default": "retail_lakehouse"
+    },
+    {
+      "name": "landing_path",
+      "default": "/tmp/retail_lakehouse/landing"
+    }
+  ],
+  "git_source": {
+    "git_url": "https://https://github.com/Ultracheese1007/azure-retail-supply-chain-lakehouse",
+    "git_provider": "gitHub",
+    "git_branch": "main"
+  },
+  "tasks": [
+    {
+      "task_key": "generate_source_data",
+      "description": "Write the two deterministic source batches to the landing path.",
+      "notebook_task": {
+        "notebook_path": "databricks/bronze/01_generate_demo_batches",
+        "source": "GIT",
+        "base_parameters": {
+          "landing_path": "{{job.parameters.landing_path}}"
+        }
+      },
+      "max_retries": 2,
+      "min_retry_interval_millis": 30000,
+      "retry_on_timeout": true,
+      "timeout_seconds": 900
+    },
+    {
+      "task_key": "create_lakehouse",
+      "description": "Create the catalog and the bronze/silver/gold/quarantine schemas.",
+      "notebook_task": {
+        "notebook_path": "databricks/setup/01_create_lakehouse",
+        "source": "GIT",
+        "base_parameters": {
+          "catalog": "{{job.parameters.catalog}}"
+        }
+      },
+      "max_retries": 2,
+      "min_retry_interval_millis": 30000,
+      "retry_on_timeout": true,
+      "timeout_seconds": 900
+    },
+    {
+      "task_key": "load_bronze",
+      "description": "Load both batches into Bronze with audit columns.",
+      "depends_on": [
+        { "task_key": "generate_source_data" },
+        { "task_key": "create_lakehouse" }
+      ],
+      "notebook_task": {
+        "notebook_path": "databricks/bronze/02_load_bronze",
+        "source": "GIT",
+        "base_parameters": {
+          "catalog": "{{job.parameters.catalog}}",
+          "landing_path": "{{job.parameters.landing_path}}"
+        }
+      },
+      "max_retries": 2,
+      "min_retry_interval_millis": 30000,
+      "retry_on_timeout": true,
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "clean_products",
+      "depends_on": [{ "task_key": "load_bronze" }],
+      "notebook_task": {
+        "notebook_path": "databricks/silver/01_clean_products",
+        "source": "GIT",
+        "base_parameters": { "catalog": "{{job.parameters.catalog}}" }
+      },
+      "max_retries": 1,
+      "min_retry_interval_millis": 30000,
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "clean_warehouses",
+      "depends_on": [{ "task_key": "load_bronze" }],
+      "notebook_task": {
+        "notebook_path": "databricks/silver/02_clean_warehouses",
+        "source": "GIT",
+        "base_parameters": { "catalog": "{{job.parameters.catalog}}" }
+      },
+      "max_retries": 1,
+      "min_retry_interval_millis": 30000,
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "clean_orders",
+      "depends_on": [{ "task_key": "load_bronze" }],
+      "notebook_task": {
+        "notebook_path": "databricks/silver/03_clean_orders",
+        "source": "GIT",
+        "base_parameters": { "catalog": "{{job.parameters.catalog}}" }
+      },
+      "max_retries": 1,
+      "min_retry_interval_millis": 30000,
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "clean_order_items",
+      "depends_on": [{ "task_key": "load_bronze" }],
+      "notebook_task": {
+        "notebook_path": "databricks/silver/04_clean_order_items",
+        "source": "GIT",
+        "base_parameters": { "catalog": "{{job.parameters.catalog}}" }
+      },
+      "max_retries": 1,
+      "min_retry_interval_millis": 30000,
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "clean_inventory_events",
+      "depends_on": [{ "task_key": "load_bronze" }],
+      "notebook_task": {
+        "notebook_path": "databricks/silver/05_clean_inventory_events",
+        "source": "GIT",
+        "base_parameters": { "catalog": "{{job.parameters.catalog}}" }
+      },
+      "max_retries": 1,
+      "min_retry_interval_millis": 30000,
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "customer_scd2",
+      "description": "Build Type 2 customer history: detect (null-safe), expire, insert.",
+      "depends_on": [{ "task_key": "load_bronze" }],
+      "notebook_task": {
+        "notebook_path": "databricks/silver/06_build_customer_history",
+        "source": "GIT",
+        "base_parameters": { "catalog": "{{job.parameters.catalog}}" }
+      },
+      "max_retries": 1,
+      "min_retry_interval_millis": 30000,
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "gold_dimensions",
+      "description": "Rebuild dim_customer (Type 2), dim_product, dim_warehouse, dim_date.",
+      "depends_on": [
+        { "task_key": "clean_products" },
+        { "task_key": "clean_warehouses" },
+        { "task_key": "customer_scd2" }
+      ],
+      "notebook_task": {
+        "notebook_path": "databricks/gold/01_build_dimensions",
+        "source": "GIT",
+        "base_parameters": { "catalog": "{{job.parameters.catalog}}" }
+      },
+      "max_retries": 1,
+      "min_retry_interval_millis": 30000,
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "gold_sales_fact",
+      "description": "Rebuild fct_sales with the point-in-time customer join.",
+      "depends_on": [
+        { "task_key": "gold_dimensions" },
+        { "task_key": "clean_orders" },
+        { "task_key": "clean_order_items" }
+      ],
+      "notebook_task": {
+        "notebook_path": "databricks/gold/02_build_sales_fact",
+        "source": "GIT",
+        "base_parameters": { "catalog": "{{job.parameters.catalog}}" }
+      },
+      "max_retries": 1,
+      "min_retry_interval_millis": 30000,
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "gold_inventory_fact",
+      "description": "Rebuild fct_inventory_movements.",
+      "depends_on": [
+        { "task_key": "gold_dimensions" },
+        { "task_key": "clean_inventory_events" }
+      ],
+      "notebook_task": {
+        "notebook_path": "databricks/gold/03_build_inventory_fact",
+        "source": "GIT",
+        "base_parameters": { "catalog": "{{job.parameters.catalog}}" }
+      },
+      "max_retries": 1,
+      "min_retry_interval_millis": 30000,
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "validate",
+      "description": "Executable validation gate. No retries: a failed check is deterministic.",
+      "depends_on": [
+        { "task_key": "gold_sales_fact" },
+        { "task_key": "gold_inventory_fact" }
+      ],
+      "notebook_task": {
+        "notebook_path": "databricks/quality/01_validate_pipeline",
+        "source": "GIT",
+        "base_parameters": { "catalog": "{{job.parameters.catalog}}" }
+      },
+      "max_retries": 0,
+      "timeout_seconds": 1800
+    }
+  ]
+}
