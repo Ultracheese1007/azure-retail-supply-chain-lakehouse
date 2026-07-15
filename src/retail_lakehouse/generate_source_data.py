@@ -25,8 +25,19 @@ from datetime import datetime
 SEED = 42
 
 # Fixed reference timestamps per batch (never datetime.now()).
-BATCH1_TS = datetime(2024, 1, 15, 10, 0, 0)
-BATCH2_TS = datetime(2024, 2, 15, 10, 0, 0)
+#
+# These are the times at which customer records are created (batch 1) and
+# changed (batch 2). They must sit *before* the orders that should see them,
+# otherwise point-in-time joins in the Gold layer cannot resolve a customer
+# version for an order:
+#
+#   BATCH1_TS  <  batch-1 orders (Jan 10-14)   -> orders see the first version
+#   BATCH2_TS  <  batch-2 orders (Feb 12-14)   -> orders see the changed version
+#
+# A customer must exist before they can place an order, and a change must
+# precede the orders that are supposed to reflect it.
+BATCH1_TS = datetime(2024, 1, 1, 8, 0, 0)
+BATCH2_TS = datetime(2024, 2, 1, 9, 0, 0)
 
 # Identifiers of the deliberately-planted edge cases, exposed by name so tests
 # and documentation can reference them instead of using magic strings.
