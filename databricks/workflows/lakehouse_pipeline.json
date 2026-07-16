@@ -10,7 +10,7 @@
     },
     {
       "name": "landing_path",
-      "default": "/tmp/retail_lakehouse/landing"
+      "default": "/Volumes/retail_lakehouse/bronze/landing_files/source"
     }
   ],
   "git_source": {

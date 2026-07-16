@@ -25,7 +25,9 @@ from pyspark.sql.types import StringType, StructField, StructType
 # COMMAND ----------
 
 dbutils.widgets.text("catalog", "retail_lakehouse")
-dbutils.widgets.text("landing_path", "/tmp/retail_lakehouse/landing")
+# Default is the managed volume created by databricks/setup/01_create_lakehouse.
+# The widget lets a job override it.
+dbutils.widgets.text("landing_path", "/Volumes/retail_lakehouse/bronze/landing_files/source")
 catalog = dbutils.widgets.get("catalog")
 landing_path = dbutils.widgets.get("landing_path")
 print(f"catalog={catalog}  landing_path={landing_path}")

@@ -26,7 +26,10 @@ from retail_lakehouse import generate_source_data as gen  # noqa: E402
 
 # COMMAND ----------
 
-dbutils.widgets.text("landing_path", "/tmp/retail_lakehouse/landing")
+# Default is the managed volume created by databricks/setup/01_create_lakehouse.
+# It is shared storage: every serverless task can read it, unlike /tmp which is
+# local to a single task's compute. The widget lets a job override it.
+dbutils.widgets.text("landing_path", "/Volumes/retail_lakehouse/bronze/landing_files/source")
 landing_path = dbutils.widgets.get("landing_path")
 print(f"Writing demo batches to: {landing_path}")
 
