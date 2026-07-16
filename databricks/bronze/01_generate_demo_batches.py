@@ -35,10 +35,12 @@ print(f"Writing demo batches to: {landing_path}")
 
 # COMMAND ----------
 
-# Write CSVs to the driver-local filesystem first, then copy into the landing
-# path (works for both DBFS and Unity Catalog Volume targets).
-local_dir = "/tmp/_retail_gen"
-summary = gen.write_csvs(local_dir)
+# Write the deterministic CSV batches directly to the managed Volume.
+# Databricks serverless compute blocks dbutils.fs access to driver-local
+# file:/tmp paths, while Unity Catalog Volumes support direct POSIX writes.
+dbutils.fs.mkdirs(landing_path)
+summary = gen.write_csvs(landing_path)
+
 print("Row counts by batch/entity:")
 for batch, entities in summary.items():
     for entity, count in entities.items():
@@ -46,14 +48,14 @@ for batch, entities in summary.items():
 
 # COMMAND ----------
 
-dbutils.fs.mkdirs(landing_path)
-for batch in ("batch_1", "batch_2"):
-    for entity in gen.COLUMNS:
-        src = f"file:{local_dir}/{batch}/{entity}.csv"
-        dst = f"{landing_path}/{batch}/{entity}.csv"
-        dbutils.fs.cp(src, dst)
-print("Landing files:")
+print("Landing batches:")
 display(dbutils.fs.ls(landing_path))
+
+print("Batch 1 files:")
+display(dbutils.fs.ls(f"{landing_path}/batch_1"))
+
+print("Batch 2 files:")
+display(dbutils.fs.ls(f"{landing_path}/batch_2"))
 
 # COMMAND ----------
 
