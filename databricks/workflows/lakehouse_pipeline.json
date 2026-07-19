@@ -22,6 +22,7 @@
     {
       "task_key": "generate_source_data",
       "description": "Write the two deterministic source batches to the landing path.",
+      "depends_on": [{ "task_key": "create_lakehouse" }],
       "notebook_task": {
         "notebook_path": "databricks/bronze/01_generate_demo_batches",
         "source": "GIT",
