@@ -1,0 +1,30 @@
+{
+  "name": "ds_adls_landing",
+  "properties": {
+    "type": "Parquet",
+    "description": "Reusable, parameterized ADLS Gen2 landing sink. The path is partitioned by entity and load date so every run lands in its own folder: landing/<targetPath>/load_date=YYYY-MM-DD/.",
+    "linkedServiceName": {
+      "referenceName": "ls_adls_gen2",
+      "type": "LinkedServiceReference",
+      "parameters": {
+        "storageAccountName": "@dataset().storageAccountName"
+      }
+    },
+    "parameters": {
+      "storageAccountName": { "type": "string" },
+      "containerName": { "type": "string" },
+      "targetPath": { "type": "string" },
+      "loadDate": { "type": "string" }
+    },
+    "typeProperties": {
+      "location": {
+        "type": "AzureBlobFSLocation",
+        "fileSystem": "@dataset().containerName",
+        "folderPath": "@concat(dataset().targetPath, '/load_date=', dataset().loadDate)"
+      },
+      "compressionCodec": "snappy"
+    },
+    "schema": [],
+    "annotations": ["retail", "landing"]
+  }
+}

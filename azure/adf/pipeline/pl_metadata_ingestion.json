@@ -1,0 +1,280 @@
+{
+  "name": "pl_metadata_ingestion",
+  "properties": {
+    "description": "Metadata-driven ingestion. Reads active entities from control.ingestion_metadata and, per entity, branches on load_type: a full load copies the whole table; an incremental load reads the high watermark, copies only rows past the stored watermark, and advances the watermark only after the copy succeeds. Full loads never compute MAX() and never touch the watermark.",
+    "parameters": {
+      "sqlServerName": {
+        "type": "string"
+      },
+      "sqlDatabaseName": {
+        "type": "string"
+      },
+      "storageAccountName": {
+        "type": "string"
+      },
+      "containerName": {
+        "type": "string",
+        "defaultValue": "landing"
+      },
+      "loadDate": {
+        "type": "string",
+        "defaultValue": ""
+      }
+    },
+    "activities": [
+      {
+        "name": "LookupActiveEntities",
+        "type": "Lookup",
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 2,
+          "retryIntervalInSeconds": 30
+        },
+        "typeProperties": {
+          "source": {
+            "type": "AzureSqlSource",
+            "sqlReaderQuery": "SELECT entity_name, source_schema, source_table, load_type, watermark_column, target_path, last_watermark_value FROM control.ingestion_metadata WHERE is_active = 1"
+          },
+          "dataset": {
+            "referenceName": "ds_azure_sql_table",
+            "type": "DatasetReference",
+            "parameters": {
+              "sqlServerName": "@pipeline().parameters.sqlServerName",
+              "sqlDatabaseName": "@pipeline().parameters.sqlDatabaseName",
+              "sourceSchema": "control",
+              "sourceTable": "ingestion_metadata"
+            }
+          },
+          "firstRowOnly": false
+        }
+      },
+      {
+        "name": "ForEachEntity",
+        "type": "ForEach",
+        "dependsOn": [
+          {
+            "activity": "LookupActiveEntities",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('LookupActiveEntities').output.value",
+            "type": "Expression"
+          },
+          "isSequential": false,
+          "batchCount": 4,
+          "activities": [
+            {
+              "name": "BranchOnLoadType",
+              "type": "IfCondition",
+              "typeProperties": {
+                "expression": {
+                  "value": "@equals(item().load_type, 'incremental')",
+                  "type": "Expression"
+                },
+                "ifTrueActivities": [
+                  {
+                    "name": "GetHighWatermark",
+                    "type": "Lookup",
+                    "policy": {
+                      "timeout": "0.00:10:00",
+                      "retry": 2,
+                      "retryIntervalInSeconds": 30
+                    },
+                    "typeProperties": {
+                      "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": {
+                          "value": "SELECT CAST(MAX([@{item().watermark_column}]) AS DATETIME2(6)) AS high_watermark FROM [@{item().source_schema}].[@{item().source_table}]",
+                          "type": "Expression"
+                        }
+                      },
+                      "dataset": {
+                        "referenceName": "ds_azure_sql_table",
+                        "type": "DatasetReference",
+                        "parameters": {
+                          "sqlServerName": "@pipeline().parameters.sqlServerName",
+                          "sqlDatabaseName": "@pipeline().parameters.sqlDatabaseName",
+                          "sourceSchema": "@item().source_schema",
+                          "sourceTable": "@item().source_table"
+                        }
+                      },
+                      "firstRowOnly": true
+                    }
+                  },
+                  {
+                    "name": "CopyIncremental",
+                    "type": "Copy",
+                    "dependsOn": [
+                      {
+                        "activity": "GetHighWatermark",
+                        "dependencyConditions": [
+                          "Succeeded"
+                        ]
+                      }
+                    ],
+                    "policy": {
+                      "timeout": "0.02:00:00",
+                      "retry": 2,
+                      "retryIntervalInSeconds": 30
+                    },
+                    "typeProperties": {
+                      "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": {
+                          "value": "SELECT * FROM [@{item().source_schema}].[@{item().source_table}] WHERE [@{item().watermark_column}] > '@{coalesce(item().last_watermark_value, '1900-01-01')}' AND [@{item().watermark_column}] <= '@{activity('GetHighWatermark').output.firstRow.high_watermark}'",
+                          "type": "Expression"
+                        }
+                      },
+                      "sink": {
+                        "type": "ParquetSink",
+                        "storeSettings": {
+                          "type": "AzureBlobFSWriteSettings"
+                        }
+                      },
+                      "enableStaging": false
+                    },
+                    "inputs": [
+                      {
+                        "referenceName": "ds_azure_sql_table",
+                        "type": "DatasetReference",
+                        "parameters": {
+                          "sqlServerName": "@pipeline().parameters.sqlServerName",
+                          "sqlDatabaseName": "@pipeline().parameters.sqlDatabaseName",
+                          "sourceSchema": "@item().source_schema",
+                          "sourceTable": "@item().source_table"
+                        }
+                      }
+                    ],
+                    "outputs": [
+                      {
+                        "referenceName": "ds_adls_landing",
+                        "type": "DatasetReference",
+                        "parameters": {
+                          "storageAccountName": "@pipeline().parameters.storageAccountName",
+                          "containerName": "@pipeline().parameters.containerName",
+                          "targetPath": "@item().target_path",
+                          "loadDate": "@pipeline().parameters.loadDate"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "name": "AdvanceWatermarkIfPresent",
+                    "type": "IfCondition",
+                    "description": "Advance the stored watermark only after a successful incremental copy, and only when a non-null high watermark was found. A null high watermark (empty source) must not erase the previous watermark.",
+                    "dependsOn": [
+                      {
+                        "activity": "CopyIncremental",
+                        "dependencyConditions": [
+                          "Succeeded"
+                        ]
+                      }
+                    ],
+                    "typeProperties": {
+                      "expression": {
+                        "value": "@not(equals(activity('GetHighWatermark').output.firstRow.high_watermark, null))",
+                        "type": "Expression"
+                      },
+                      "ifTrueActivities": [
+                        {
+                          "name": "UpdateWatermark",
+                          "type": "SqlServerStoredProcedure",
+                          "policy": {
+                            "timeout": "0.00:10:00",
+                            "retry": 2,
+                            "retryIntervalInSeconds": 30
+                          },
+                          "typeProperties": {
+                            "storedProcedureName": "control.update_watermark",
+                            "storedProcedureParameters": {
+                              "entity_name": {
+                                "value": "@item().entity_name",
+                                "type": "String"
+                              },
+                              "new_watermark_value": {
+                                "value": "@activity('GetHighWatermark').output.firstRow.high_watermark",
+                                "type": "DateTime"
+                              }
+                            }
+                          },
+                          "linkedServiceName": {
+                            "referenceName": "ls_azure_sql",
+                            "type": "LinkedServiceReference",
+                            "parameters": {
+                              "sqlServerName": "@pipeline().parameters.sqlServerName",
+                              "sqlDatabaseName": "@pipeline().parameters.sqlDatabaseName"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "ifFalseActivities": [
+                  {
+                    "name": "CopyFull",
+                    "type": "Copy",
+                    "description": "Full snapshot: copy the whole table. No MAX() and no watermark update.",
+                    "policy": {
+                      "timeout": "0.02:00:00",
+                      "retry": 2,
+                      "retryIntervalInSeconds": 30
+                    },
+                    "typeProperties": {
+                      "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": {
+                          "value": "SELECT * FROM [@{item().source_schema}].[@{item().source_table}]",
+                          "type": "Expression"
+                        }
+                      },
+                      "sink": {
+                        "type": "ParquetSink",
+                        "storeSettings": {
+                          "type": "AzureBlobFSWriteSettings"
+                        }
+                      },
+                      "enableStaging": false
+                    },
+                    "inputs": [
+                      {
+                        "referenceName": "ds_azure_sql_table",
+                        "type": "DatasetReference",
+                        "parameters": {
+                          "sqlServerName": "@pipeline().parameters.sqlServerName",
+                          "sqlDatabaseName": "@pipeline().parameters.sqlDatabaseName",
+                          "sourceSchema": "@item().source_schema",
+                          "sourceTable": "@item().source_table"
+                        }
+                      }
+                    ],
+                    "outputs": [
+                      {
+                        "referenceName": "ds_adls_landing",
+                        "type": "DatasetReference",
+                        "parameters": {
+                          "storageAccountName": "@pipeline().parameters.storageAccountName",
+                          "containerName": "@pipeline().parameters.containerName",
+                          "targetPath": "@item().target_path",
+                          "loadDate": "@pipeline().parameters.loadDate"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "annotations": [
+      "retail",
+      "ingestion"
+    ]
+  }
+}

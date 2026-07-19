@@ -1,0 +1,87 @@
+{
+  "name": "pl_orchestrate_lakehouse",
+  "properties": {
+    "description": "Top-level orchestration. Runs metadata ingestion into ADLS, and only if that succeeds, triggers the pre-configured Azure Databricks Job by ID. The job's landing_path (ADLS) is set as a job default when the job is created at deploy time (see docs/azure-deployment-guide.md); it is not passed here, so no Self-hosted Integration Runtime is required. Either stage failing fails the pipeline.",
+    "parameters": {
+      "sqlServerName": {
+        "type": "string"
+      },
+      "sqlDatabaseName": {
+        "type": "string"
+      },
+      "storageAccountName": {
+        "type": "string"
+      },
+      "containerName": {
+        "type": "string",
+        "defaultValue": "landing"
+      },
+      "databricksWorkspaceUrl": {
+        "type": "string"
+      },
+      "databricksWorkspaceResourceId": {
+        "type": "string"
+      },
+      "databricksJobId": {
+        "type": "string"
+      },
+      "loadDate": {
+        "type": "string",
+        "defaultValue": ""
+      }
+    },
+    "activities": [
+      {
+        "name": "RunMetadataIngestion",
+        "type": "ExecutePipeline",
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "pl_metadata_ingestion",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {
+            "sqlServerName": "@pipeline().parameters.sqlServerName",
+            "sqlDatabaseName": "@pipeline().parameters.sqlDatabaseName",
+            "storageAccountName": "@pipeline().parameters.storageAccountName",
+            "containerName": "@pipeline().parameters.containerName",
+            "loadDate": "@if(empty(pipeline().parameters.loadDate), formatDateTime(utcNow(), 'yyyy-MM-dd'), pipeline().parameters.loadDate)"
+          }
+        }
+      },
+      {
+        "name": "RunDatabricksLakehouseJob",
+        "type": "DatabricksJob",
+        "description": "Triggers the pre-configured Databricks Job by ID. The job's ADLS landing_path is a job-level default set at deploy time; no per-run jobParameters are passed, so no Self-hosted Integration Runtime is needed.",
+        "dependsOn": [
+          {
+            "activity": "RunMetadataIngestion",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.02:00:00",
+          "retry": 1,
+          "retryIntervalInSeconds": 60
+        },
+        "typeProperties": {
+          "jobId": "@pipeline().parameters.databricksJobId"
+        },
+        "linkedServiceName": {
+          "referenceName": "ls_azure_databricks",
+          "type": "LinkedServiceReference",
+          "parameters": {
+            "databricksWorkspaceUrl": "@pipeline().parameters.databricksWorkspaceUrl",
+            "databricksWorkspaceResourceId": "@pipeline().parameters.databricksWorkspaceResourceId"
+          }
+        }
+      }
+    ],
+    "annotations": [
+      "retail",
+      "orchestration"
+    ]
+  }
+}

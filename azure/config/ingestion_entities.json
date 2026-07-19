@@ -1,0 +1,71 @@
+{
+  "description": "Ingestion metadata for the retail lakehouse. One row per source entity. This file is the design-time source of truth; at deploy time the same rows are loaded into the control.ingestion_metadata table (see azure/sql/001_create_ingestion_control.sql) that the ADF metadata-driven pipeline reads.",
+  "entities": [
+    {
+      "entity_name": "customers",
+      "source_schema": "retail",
+      "source_table": "customers",
+      "load_type": "incremental",
+      "watermark_column": "updated_at",
+      "target_path": "retail/customers",
+      "file_format": "parquet",
+      "is_active": true,
+      "notes": "Master data that changes over time; incremental on updated_at feeds the Silver SCD Type 2 build."
+    },
+    {
+      "entity_name": "products",
+      "source_schema": "retail",
+      "source_table": "products",
+      "load_type": "incremental",
+      "watermark_column": "updated_at",
+      "target_path": "retail/products",
+      "file_format": "parquet",
+      "is_active": true,
+      "notes": "Catalog carries updated_at, so incremental is used to avoid reloading the full catalog each run."
+    },
+    {
+      "entity_name": "warehouses",
+      "source_schema": "retail",
+      "source_table": "warehouses",
+      "load_type": "full",
+      "watermark_column": null,
+      "target_path": "retail/warehouses",
+      "file_format": "parquet",
+      "is_active": true,
+      "notes": "Small, slowly-changing reference table with no change timestamp; a full load each run is cheaper than maintaining a watermark."
+    },
+    {
+      "entity_name": "orders",
+      "source_schema": "retail",
+      "source_table": "orders",
+      "load_type": "incremental",
+      "watermark_column": "order_timestamp",
+      "target_path": "retail/orders",
+      "file_format": "parquet",
+      "is_active": true,
+      "notes": "Append-oriented transactional table; order_timestamp is monotonic at insert and used as the watermark."
+    },
+    {
+      "entity_name": "order_items",
+      "source_schema": "retail",
+      "source_table": "order_items",
+      "load_type": "full",
+      "watermark_column": null,
+      "target_path": "retail/order_items",
+      "file_format": "parquet",
+      "is_active": true,
+      "notes": "The current source contract has no change/insert timestamp on order_items, so it cannot be loaded incrementally without one. Full load is used until the Azure source exposes an updated_at (or order_timestamp propagated from orders); the target Azure source contract should add such a column to enable incremental loading."
+    },
+    {
+      "entity_name": "inventory_events",
+      "source_schema": "retail",
+      "source_table": "inventory_events",
+      "load_type": "incremental",
+      "watermark_column": "event_timestamp",
+      "target_path": "retail/inventory_events",
+      "file_format": "parquet",
+      "is_active": true,
+      "notes": "Append-only event stream; event_timestamp is the natural watermark."
+    }
+  ]
+}

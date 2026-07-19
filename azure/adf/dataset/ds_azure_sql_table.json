@@ -1,0 +1,26 @@
+{
+  "name": "ds_azure_sql_table",
+  "properties": {
+    "type": "AzureSqlTable",
+    "description": "Reusable, parameterized source dataset. One definition serves every entity; schema and table are supplied per activity.",
+    "linkedServiceName": {
+      "referenceName": "ls_azure_sql",
+      "type": "LinkedServiceReference",
+      "parameters": {
+        "sqlServerName": "@dataset().sqlServerName",
+        "sqlDatabaseName": "@dataset().sqlDatabaseName"
+      }
+    },
+    "parameters": {
+      "sqlServerName": { "type": "string" },
+      "sqlDatabaseName": { "type": "string" },
+      "sourceSchema": { "type": "string" },
+      "sourceTable": { "type": "string" }
+    },
+    "typeProperties": {
+      "schema": "@dataset().sourceSchema",
+      "table": "@dataset().sourceTable"
+    },
+    "annotations": ["retail", "source"]
+  }
+}

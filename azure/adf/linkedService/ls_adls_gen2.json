@@ -1,0 +1,14 @@
+{
+  "name": "ls_adls_gen2",
+  "properties": {
+    "type": "AzureBlobFS",
+    "description": "ADLS Gen2 landing zone. Authenticates with the Data Factory system-assigned managed identity granted Storage Blob Data Contributor on the account.",
+    "parameters": {
+      "storageAccountName": { "type": "string" }
+    },
+    "typeProperties": {
+      "url": "https://@{linkedService().storageAccountName}.dfs.core.windows.net"
+    },
+    "annotations": ["retail", "landing"]
+  }
+}

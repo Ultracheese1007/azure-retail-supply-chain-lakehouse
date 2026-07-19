@@ -1,0 +1,17 @@
+{
+  "name": "ls_azure_databricks",
+  "properties": {
+    "type": "AzureDatabricks",
+    "description": "Azure Databricks workspace used to run the existing multi-task Lakehouse Job. Authenticates with the Data Factory system-assigned managed identity; the job is referenced by ID and both are supplied as parameters.",
+    "parameters": {
+      "databricksWorkspaceUrl": { "type": "string" },
+      "databricksWorkspaceResourceId": { "type": "string" }
+    },
+    "typeProperties": {
+      "domain": "@{linkedService().databricksWorkspaceUrl}",
+      "authentication": "MSI",
+      "workspaceResourceId": "@{linkedService().databricksWorkspaceResourceId}"
+    },
+    "annotations": ["retail", "processing"]
+  }
+}

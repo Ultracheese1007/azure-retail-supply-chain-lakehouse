@@ -90,9 +90,16 @@ def test_no_hardcoded_compute_or_personal_environment():
         assert forbidden not in raw, f"workflow contains {forbidden!r}"
 
 
-def test_pipeline_starts_from_generation_and_setup(tasks):
+def test_pipeline_starts_from_setup(tasks):
+    """create_lakehouse is the sole root: the landing volume must exist before
+    source generation writes into it."""
     roots = {k for k, t in tasks.items() if not t.get("depends_on")}
-    assert roots == {"generate_source_data", "create_lakehouse"}
+    assert roots == {"create_lakehouse"}
+
+
+def test_source_generation_waits_for_the_landing_volume(tasks):
+    deps = {d["task_key"] for d in tasks["generate_source_data"].get("depends_on", [])}
+    assert "create_lakehouse" in deps
 
 
 def test_validation_is_the_final_gate(tasks):

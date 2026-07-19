@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    name: Python lint and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff
+        run: python -m ruff check .
+
+      - name: Pytest
+        run: PYTHONPATH=src python -m pytest -q
+
+  json:
+    name: Validate JSON assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse every JSON file
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          failed = []
+          for path in pathlib.Path(".").rglob("*.json"):
+              if ".git" in path.parts:
+                  continue
+              try:
+                  json.loads(path.read_text())
+              except json.JSONDecodeError as exc:
+                  failed.append(f"{path}: {exc}")
+          if failed:
+              print("\n".join(failed))
+              sys.exit(1)
+          print("All JSON files parsed.")
+          PY
+
+  bicep:
+    name: Compile Bicep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bicep CLI
+        run: |
+          curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x bicep
+          sudo mv bicep /usr/local/bin/bicep
+          bicep --version
+
+      - name: Build main template
+        run: bicep build azure/bicep/main.bicep --stdout > /dev/null

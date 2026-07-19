@@ -48,3 +48,4 @@ _delta_log/
 
 # Generator output
 generated_source_data/
+*.egg-info/

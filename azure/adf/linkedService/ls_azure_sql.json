@@ -1,0 +1,17 @@
+{
+  "name": "ls_azure_sql",
+  "properties": {
+    "type": "AzureSqlDatabase",
+    "description": "Operational source database. Authenticates with the Data Factory system-assigned managed identity; no connection string secret is stored.",
+    "parameters": {
+      "sqlServerName": { "type": "string" },
+      "sqlDatabaseName": { "type": "string" }
+    },
+    "typeProperties": {
+      "server": "@{linkedService().sqlServerName}.database.windows.net",
+      "database": "@{linkedService().sqlDatabaseName}",
+      "authenticationType": "SystemAssignedManagedIdentity"
+    },
+    "annotations": ["retail", "source"]
+  }
+}
