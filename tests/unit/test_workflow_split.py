@@ -95,13 +95,15 @@ def test_readme_does_not_claim_a_live_azure_deployment():
         assert phrase not in text, f"README makes an unsupported claim: {phrase!r}"
 
 
-def test_readme_does_not_claim_bicep_already_compiled():
-    """Bicep compilation runs in CI; until it passes there, do not assert it compiles."""
+def test_readme_bicep_claim_stays_within_what_ci_proves():
+    """CI now compiles Bicep, so 'compiled in CI' is accurate. What must never
+    appear is a claim beyond compilation — deployment or provisioning."""
     text = README.read_text().lower()
-    for phrase in ("bicep compiles", "bicep compiled", "statically validated in ci"):
-        assert phrase not in text, f"README asserts unverified Bicep result: {phrase!r}"
-    # The approved phrasing must be present instead.
-    assert "bicep compilation is configured in ci" in text
+    # Compilation is verified in CI; provisioning/deployment is not.
+    for phrase in ("bicep deployed", "infrastructure deployed", "provisioned in azure"):
+        assert phrase not in text, f"README overclaims beyond CI: {phrase!r}"
+    # The Bicep status must still be qualified as not provisioned somewhere.
+    assert "not provisioned" in text
 
 
 def test_docs_do_not_claim_notebooks_run_unchanged():

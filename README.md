@@ -1,80 +1,129 @@
 # Azure Retail & Supply Chain Lakehouse
 
-An end-to-end data engineering project for a multi-warehouse e-commerce retailer:
-a governed lakehouse that manages customer history, produces trustworthy sales
-analytics, and tracks inventory movement across warehouses.
+An Azure-ready data platform for a multi-warehouse e-commerce retailer. It ingests
+operational data through **Azure Data Factory** into **ADLS Gen2**, then transforms
+it into governed, analytics-ready **Delta Lake** models on **Databricks** using a
+Medallion (Bronze → Silver → Gold) architecture.
 
-The data-transformation and orchestration core is built on **Databricks,
-PySpark, Delta Lake, Unity Catalog and Databricks Workflows**, and has been
-implemented and **executed** end to end (on Databricks, with managed storage).
-It is fronted by an **Azure Data Factory** metadata-driven ingestion layer
-landing into **ADLS Gen2**, with infrastructure defined in **Bicep**. The Azure
-Databricks / ADF / ADLS target is **defined and statically checked, not
-provisioned**: Bicep compilation is configured in CI and must pass before the
-Azure assets are considered statically validated.
+The pipeline preserves customer history for point-in-time analysis, produces
+consistent sales and inventory facts, and enforces data quality with an executable
+validation gate that fails the run rather than publishing bad data.
 
-## Business problem
+![Azure](https://img.shields.io/badge/Cloud-Microsoft%20Azure-0078D4)
+![Databricks](https://img.shields.io/badge/Processing-Databricks-FF3621)
+![ADLS](https://img.shields.io/badge/Storage-ADLS%20Gen2-0078D4)
+![Delta](https://img.shields.io/badge/Format-Delta%20Lake-00ADD4)
+![ADF](https://img.shields.io/badge/Ingestion-Azure%20Data%20Factory-0078D4)
+![IaC](https://img.shields.io/badge/IaC-Bicep-8A2BE2)
+![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF)
+![Tests](https://img.shields.io/badge/tests-95%20passing-3FB950)
+
+## What this project does
 
 A multi-warehouse retailer holds operational data across several systems: a
 customer master that changes over time, a product catalog, warehouse locations,
-order headers and line items, and a continuous stream of inventory movements.
+order headers and line items, and a stream of inventory movements. Reporting
+directly against those systems is slow, couples analytics to transactional load,
+and gives no reliable view of history — for example, *what a customer's region was
+at the time an order was placed*.
 
-Reporting directly against these systems is slow, couples analytics to
-transactional load, and gives no reliable view of history — for example, what a
-customer's attributes were at the time an order was placed. This project builds a
-lakehouse that preserves customer history for point-in-time analysis, produces
-consistent sales facts, tracks inventory movement per warehouse, and makes
-data-quality expectations explicit and enforced.
+This platform solves that with a governed lakehouse:
+
+- **Metadata-driven ingestion** — one parameterized Azure Data Factory pipeline
+  serves all six entities from a control table, choosing full or watermark-based
+  incremental loading per entity.
+- **Slowly Changing Dimension (Type 2)** — customer history is preserved with a
+  two-stage expire-and-insert and null-safe change detection.
+- **Point-in-time dimensional joins** — each order joins to the customer version
+  in effect *at order time*, so history is accurate and facts never fan out.
+- **Data quality by construction** — deduplication, quarantine with reasons,
+  referential-integrity and business-rule checks, gated by an executable
+  validation task.
+- **Dependency-aware orchestration** — a Databricks multi-task Workflow with
+  retries, upstream-failure propagation, and idempotent reruns.
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    SQL[(Azure SQL<br/>operational source)]
+    ADF[Azure Data Factory<br/>metadata-driven ingestion]
+    ADLS[(ADLS Gen2<br/>landing zone · Parquet)]
+    subgraph DBX[Azure Databricks · Delta Lake]
+        direction LR
+        B[Bronze<br/>raw + audit]
+        S[Silver<br/>clean · dedup · SCD2 · quarantine]
+        G[Gold<br/>dimensions · facts · point-in-time]
+        V{{Validation gate<br/>fails run on any breach}}
+        B --> S --> G --> V
+    end
+    SQL --> ADF --> ADLS --> B
 ```
-Azure SQL (operational source)
-        |
-        v
-Azure Data Factory  — metadata-driven full & watermark-incremental ingestion
-        |
-        v
-ADLS Gen2 landing zone  (Parquet, partitioned by entity and load date)
-        |
-        v
-Azure Databricks — Bronze -> Silver -> Gold -> validation  (PySpark, Delta, Unity Catalog)
-        |
-        v
-Gold star schema — Type 2 customer dimension, point-in-time sales fact, inventory fact
+
+The Databricks core (Bronze → Gold + validation) is **implemented and executed**.
+The Azure ingestion and infrastructure layer is **implemented as deployment-ready
+configuration and validated in CI**; it has not been provisioned. The two are
+decoupled so the same Silver and Gold logic runs against either a local managed
+Volume (demo) or an ADLS Gen2 landing zone (Azure target).
+
+## The star schema
+
+```mermaid
+erDiagram
+    dim_customer ||--o{ fct_sales : "point-in-time"
+    dim_product  ||--o{ fct_sales : ""
+    dim_warehouse||--o{ fct_sales : ""
+    dim_date     ||--o{ fct_sales : ""
+    dim_product  ||--o{ fct_inventory_movements : ""
+    dim_warehouse||--o{ fct_inventory_movements : ""
+    dim_date     ||--o{ fct_inventory_movements : ""
+    dim_customer {
+        string customer_sk PK
+        string customer_id
+        timestamp effective_start_timestamp
+        timestamp effective_end_timestamp
+        boolean is_current
+    }
+    fct_sales {
+        string order_item_id
+        string customer_sk FK
+        int quantity
+        double line_amount
+    }
 ```
 
-The demo and Azure targets use separate Bronze loaders and validation tasks; the
-Silver and Gold transformation core is reused unchanged. The demo path reads
-generated CSVs from a managed Volume; the Azure path reads ADF-produced Parquet
-from an ADLS Gen2 landing zone.
+`dim_customer` is a Type 2 dimension (every version kept with a validity window);
+`fct_sales` resolves the correct version per order via a half-open point-in-time
+join, which is what keeps historical reporting trustworthy.
 
-## Engineering capabilities
+## Verified engineering outcomes
 
-- **Metadata-driven ingestion** — one parameterized pipeline serves all six
-  entities from a control table, rather than a pipeline per table.
-- **Watermark incremental loading** — incremental entities copy only rows past
-  the last successful watermark; the watermark advances only after a successful
-  copy, so a failure reprocesses rather than skips.
-- **Slowly Changing Dimension Type 2** — customer history via a two-stage
-  expire-and-insert with **null-safe change detection**, so a `NULL -> value`
-  change is not missed.
-- **Point-in-time dimensional join** — the sales fact joins each order to the
-  customer version in effect *at order time*, using a half-open validity window,
-  preventing the fan-out that a naive key join would cause.
-- **Quarantine and deduplication** — invalid rows are routed to a quarantine
-  schema with a reason; duplicates collapse to one Silver row.
-- **Executable validation gate** — a validation task runs a suite of checks and
-  fails the run on any violation, rather than logging a warning.
-- **Idempotent reruns** — re-running the pipeline produces no extra customer
-  versions and no duplicated facts.
-- **Failure propagation** — the multi-task Workflow blocks dependents of a failed
-  task and ends in the validation gate.
+Real results from the executed pipeline and the test suite — no unmeasured
+percentages.
 
-## Technology stack
+| Outcome | Evidence |
+|---|---|
+| Automated unit & static-asset tests | **95 passing** |
+| Databricks pipeline validation checks | **43 / 43 passing** |
+| GitHub Actions CI (tests · JSON · Bicep compile) | **all green** |
+| Source domains modelled | 6 |
+| Duplicate sales-fact rows | 0 |
+| Unresolved Gold dimension keys | 0 |
+| Invalid order items quarantined | 1 (as designed) |
+| Idempotent reruns | verified |
+| Upstream-failure propagation | verified |
 
-Python · SQL · PySpark · Spark SQL · Delta Lake · Unity Catalog · Databricks
-Workflows · Azure Data Factory · ADLS Gen2 · Bicep · GitHub Actions
+## Evidence
+
+Screenshots from real Databricks runs (`docs/evidence/`):
+
+| | |
+|---|---|
+| Customer SCD2 history | ![](docs/evidence/milestone-3/03-scd2-history-detail.png) |
+| Point-in-time sales join | ![](docs/evidence/milestone-3/05-gold-sales-point-in-time-join.png) |
+| Validation gate passing | ![](docs/evidence/milestone-3/07-validation-success.png) |
+| Workflow DAG | ![](docs/evidence/milestone-4/01-workflow-dag.png) |
+| Upstream-failure propagation | ![](docs/evidence/milestone-4/04-failure-propagation.png) |
 
 ## Implementation status
 
@@ -84,74 +133,50 @@ Workflows · Azure Data Factory · ADLS Gen2 · Bicep · GitHub Actions
 | SCD Type 2 and point-in-time modelling | Implemented and validated |
 | Databricks multi-task Workflow | Implemented and executed |
 | Data-quality validation gate | Implemented and validated |
-| ADF metadata-driven ingestion assets | Defined; static checks configured in CI |
-| ADLS Gen2 landing configuration | Defined |
-| Azure infrastructure (ADF, ADLS Gen2, Databricks) | Defined in Bicep; not provisioned |
+| ADF metadata-driven ingestion assets | Defined; validated in CI |
+| Azure infrastructure (ADF, ADLS Gen2, Databricks) | Defined in Bicep; compiled in CI; not provisioned |
 
-The Databricks core was executed against generated data, with evidence under
-[`docs/evidence/milestone-3`](docs/evidence/milestone-3) and
-[`docs/evidence/milestone-4`](docs/evidence/milestone-4). The Azure ingestion and
-infrastructure layer is deployment-ready configuration. Its checks — JSON
-validity, ADF cross-references, secret scanning, and **Bicep compilation** — are
-configured in CI (`.github/workflows/ci.yml`) and must pass before the Azure
-assets are considered statically validated. It has **not** been provisioned, no
-ADF pipeline has run against a live source, and the core was **not** executed on
-a provisioned Azure Databricks workspace.
+The Databricks core was executed on Databricks against generated data. The Azure
+layer is deployment-ready configuration whose checks (JSON validity, cross-file
+references, secret scanning, Bicep compilation) run in GitHub Actions. It has not
+been provisioned, and no ADF pipeline has run against a live source.
 
-## Repository layout
+## Technology stack
 
-```
-databricks/          Bronze / Silver / Gold / quality notebooks and the Workflow
-src/retail_lakehouse Deterministic source generator + shared transformation logic
-tests/unit           Spark-free unit tests (transformation logic + Azure assets)
-azure/adf            Data Factory linked services, datasets and pipelines
-azure/config         Ingestion metadata for the six entities
-azure/sql            Idempotent ingestion control table + watermark procedure
-azure/bicep          ADLS Gen2, Data Factory and Databricks infrastructure
-docs/architecture    Azure target architecture
-docs/decisions       Architecture decision records
-docs/azure-deployment-guide.md
-docs/evidence        Databricks execution evidence
-```
+Python · SQL · PySpark · Spark SQL · Delta Lake · Unity Catalog · Databricks
+Workflows · Azure Data Factory · ADLS Gen2 · Bicep · GitHub Actions
 
-## Running the Databricks core
+## How to read this repository
 
-The pipeline runs on Databricks with managed storage. In order:
+| Path | What's there |
+|---|---|
+| `databricks/bronze · silver · gold · quality` | The executed pipeline: ingestion, cleaning, SCD2, star schema, validation |
+| `databricks/workflows/` | Two Job definitions — the demo workflow (evidence-backed) and the Azure-target workflow |
+| `src/retail_lakehouse/` | Deterministic data generator + shared transformation and validation logic |
+| `tests/unit/` | 95 Spark-free tests: SCD2 semantics, point-in-time correctness, Azure asset consistency |
+| `azure/adf · bicep · sql · config` | Metadata-driven ingestion, IaC modules, control table, ingestion metadata |
+| `docs/architecture · decisions` | Target architecture and architecture decision records |
+| `docs/evidence/` | Screenshots from real Databricks runs |
 
-1. `databricks/setup/01_create_lakehouse` — catalog, schemas, landing volume
-2. `databricks/bronze/01_generate_demo_batches` — write the two source batches
-3. `databricks/bronze/02_load_bronze` — load Bronze with audit columns
-4. `databricks/silver/01`–`06` — clean, quarantine, and build SCD2 history
-5. `databricks/gold/01`–`03` — dimensions and facts
-6. `databricks/quality/01_validate_pipeline` — the validation gate
-
-Or import `databricks/workflows/lakehouse_pipeline.json` as a multi-task Job and
-run it end to end. Deploying the Azure layer is described in
-[`docs/azure-deployment-guide.md`](docs/azure-deployment-guide.md).
-
-## Local checks
+### Run the checks locally
 
 ```bash
 python -m pip install -e ".[dev]"
-python -m ruff check .
 PYTHONPATH=src python -m pytest -q
+python -m ruff check .
 ```
 
-## Data entities
-
-`customers`, `products`, `warehouses`, `orders`, `order_items`,
-`inventory_events`. Load types per entity, and the reasoning behind each, are in
-[`docs/architecture/azure-target-architecture.md`](docs/architecture/azure-target-architecture.md).
+Deploying the Azure layer is described in
+[`docs/azure-deployment-guide.md`](docs/azure-deployment-guide.md).
 
 ## Known limitations
 
 - The source data is generated and portfolio-scale, not a production workload.
 - Gold tables are rebuilt deterministically from Silver rather than incrementally
   loaded.
-- The Azure infrastructure and ADF ingestion are defined, with static
-  validation configured in CI, but **not provisioned**; no live cloud run has
-  occurred.
-- No production SLA, throughput, or cost figures are claimed or measured.
+- The Azure infrastructure and ADF ingestion are defined and CI-validated but not
+  provisioned; no live cloud run has occurred.
 - The Azure landing design currently treats one calendar date as one logical
-  ingestion batch. A production implementation with multiple runs per day should
+  ingestion batch; a production implementation with multiple runs per day should
   add a run ID or ingestion-timestamp partition to preserve intra-day SCD changes.
+- No production SLA, throughput, or cost figures are claimed or measured.

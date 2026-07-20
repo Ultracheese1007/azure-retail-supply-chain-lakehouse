@@ -56,9 +56,9 @@ Not validated at all:
 1. Deploy the Bicep infrastructure.
 2. Grant the ADF and Databricks managed identities access to Azure SQL and ADLS.
 3. Create the control table and publish the ADF assets.
-4. Point the Databricks job's `landing_path` at the ADLS landing zone by running
-   configured as the Azure Databricks Job's `landing_path` default during
-   deployment (ADF triggers the job by ID and passes no per-run parameters).
+4. Configure the ADLS path as the Azure Databricks Job's `landing_path` default
+   during deployment (ADF triggers the job by ID and passes no per-run
+   parameters).
 
 The managed Volume path is thus a development stand-in for the ADLS Gen2 landing
 zone, swapped by parameter rather than by rewrite.
